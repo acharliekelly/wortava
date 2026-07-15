@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+from typing import Any
 
 from typer.testing import CliRunner
 
+from wortava.cli import app as cli_app
 from wortava.cli.app import app
 
 runner = CliRunner()
@@ -82,3 +84,33 @@ def test_list_checks_is_stable_and_includes_subsystems() -> None:
     assert "obs.connection" in first.stdout
     assert "audio.render" in first.stdout
     assert "system" in first.stdout
+
+
+def test_simulate_plain_terminal_has_no_ansi_sequences() -> None:
+    result = runner.invoke(app, ["simulate", "all-pass", "--plain"])
+
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.stdout
+    assert "PASS" in result.stdout
+
+
+def test_validate_accepts_plain_terminal_option() -> None:
+    result = runner.invoke(app, ["validate", "--plain"])
+
+    assert result.exit_code == 2
+    assert "\x1b[" not in result.stderr
+    assert "Adapter error:" in result.stderr
+
+
+def test_packaged_scenario_is_read_directly_from_traversable(monkeypatch: Any) -> None:
+    class MemoryResource:
+        def read_text(self, encoding: str = "utf-8") -> str:
+            assert encoding == "utf-8"
+            return Path("tests/fixtures/scenarios/all-pass.json").read_text(encoding=encoding)
+
+    monkeypatch.setattr(cli_app, "_scenario_resource", lambda _: MemoryResource())
+
+    result = runner.invoke(app, ["simulate", "all-pass", "--format", "json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["summary"]["PASS"] == 7

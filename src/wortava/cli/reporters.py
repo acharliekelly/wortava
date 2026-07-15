@@ -8,6 +8,8 @@ from wortava.domain.models import Status, Subsystem, ValidationReport
 
 
 def report_to_dict(report: ValidationReport) -> dict[str, object]:
+    if report.schema_version != "1.0":
+        raise ValueError(f"unsupported report schema version: {report.schema_version}")
     summary = Counter(result.status.value for result in report.results)
     return {
         "schema_version": report.schema_version,

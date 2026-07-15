@@ -4,6 +4,7 @@ import tomllib
 import uuid
 from enum import StrEnum
 from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Annotated, NoReturn, Protocol
 
@@ -40,9 +41,10 @@ config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(config_app, name="config")
 
 
-def _error(prefix: str, error: Exception) -> NoReturn:
+def _error(prefix: str, error: Exception, *, plain: bool = False) -> NoReturn:
     detail = str(error).splitlines()[0]
-    Console(stderr=True).print(f"{prefix}: {detail}")
+    console = Console(stderr=True, color_system=None) if plain else Console(stderr=True)
+    console.print(f"{prefix}: {detail}")
     raise typer.Exit(2)
 
 
@@ -50,7 +52,7 @@ def _default_settings_path() -> Path:
     return Path(__file__).resolve().parents[3] / "config" / "defaults.toml"
 
 
-def _scenario_path(name: str) -> Path:
+def _scenario_resource(name: str) -> Traversable:
     if not name or Path(name).name != name or name.endswith(".json"):
         raise ValueError(f"unknown scenario {name!r}")
     development_path = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "scenarios"
@@ -60,12 +62,12 @@ def _scenario_path(name: str) -> Path:
     resource = files("wortava.scenarios").joinpath(f"{name}.json")
     if not resource.is_file():
         raise ValueError(f"unknown scenario {name!r}")
-    return Path(str(resource))
+    return resource
 
 
 def _load_scenario(name: str) -> tuple[Settings, SimulatedProbes]:
-    path = _scenario_path(name)
-    data = json.loads(path.read_text(encoding="utf-8"))
+    resource = _scenario_resource(name)
+    data = json.loads(resource.read_text(encoding="utf-8"))
     settings = Settings.model_validate(data.get("settings", {"adapter_mode": "simulated"}))
     return settings, SimulatedProbes(data)
 
@@ -79,7 +81,13 @@ def _run(settings: Settings, probes: ProbeSuite) -> ValidationReport:
     return asyncio.run(run_validation(checks, str(uuid.uuid4())))
 
 
-def _render(report: ValidationReport, output_format: OutputFormat, output: Path | None) -> None:
+def _render(
+    report: ValidationReport,
+    output_format: OutputFormat,
+    output: Path | None,
+    *,
+    plain: bool,
+) -> None:
     if output_format is OutputFormat.JSON:
         rendered = json.dumps(report_to_dict(report), indent=2) + "\n"
         if output is not None:
@@ -91,7 +99,8 @@ def _render(report: ValidationReport, output_format: OutputFormat, output: Path 
         with output.open("w", encoding="utf-8") as stream:
             render_terminal(report, Console(file=stream, color_system=None))
     else:
-        render_terminal(report, Console())
+        console = Console(color_system=None) if plain else Console()
+        render_terminal(report, console)
 
 
 @app.command()
@@ -99,14 +108,15 @@ def simulate(
     scenario: str,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TERMINAL,
     output: Annotated[Path | None, typer.Option("--output")] = None,
+    plain: Annotated[bool, typer.Option("--plain", help="Disable terminal colors.")] = False,
 ) -> None:
     """Run a deterministic, fixture-backed validation scenario."""
     try:
         settings, probes = _load_scenario(scenario)
         report = _run(settings, probes)
-        _render(report, output_format, output)
+        _render(report, output_format, output, plain=plain)
     except (OSError, ValueError, json.JSONDecodeError, ValidationError) as error:
-        _error("Simulation error", error)
+        _error("Simulation error", error, plain=plain)
     raise typer.Exit(report.exit_code)
 
 
@@ -115,17 +125,18 @@ def validate_system(
     profile: Annotated[Path | None, typer.Option("--profile")] = None,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TERMINAL,
     output: Annotated[Path | None, typer.Option("--output")] = None,
+    plain: Annotated[bool, typer.Option("--plain", help="Disable terminal colors.")] = False,
 ) -> None:
     """Validate the configured system using real read-only adapters."""
     try:
         settings = load_settings(_default_settings_path(), profile)
         probes = _real_probes(settings)
         report = _run(settings, probes)
-        _render(report, output_format, output)
+        _render(report, output_format, output, plain=plain)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
-        _error("Configuration error", error)
+        _error("Configuration error", error, plain=plain)
     except AdapterUnavailableError as error:
-        _error("Adapter error", error)
+        _error("Adapter error", error, plain=plain)
     raise typer.Exit(report.exit_code)
 
 

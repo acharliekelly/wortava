@@ -2,6 +2,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from wortava.cli.reporters import render_terminal, report_to_dict
@@ -46,3 +47,15 @@ def test_terminal_report_groups_results_by_subsystem() -> None:
     assert "OBS" in output
     assert "obs.connection" in output
     assert "PASS" in output
+
+
+def test_report_to_dict_rejects_unsupported_schema_version() -> None:
+    report = ValidationReport(
+        schema_version="2.0",
+        run_id="run-fixed",
+        started_at=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+        results=(),
+    )
+
+    with pytest.raises(ValueError, match="unsupported report schema version"):
+        report_to_dict(report)
