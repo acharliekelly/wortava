@@ -1,0 +1,6 @@
+{
+  "processes": {"items": []},
+  "obs": {"observation": {"connected": false, "current_scene": null, "virtual_camera_active": null}},
+  "mixer": {"observation": {"configured": false, "reachable": null, "model": null, "address": null}},
+  "audio": {"items": []}
+}
