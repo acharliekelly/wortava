@@ -1,0 +1,46 @@
+[project]
+name = "wortava"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+  "obsws-python>=1.8,<2",
+  "psutil>=7,<8",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "python-osc>=1.9,<2",
+  "rich>=14,<15",
+  "typer>=0.16,<1",
+]
+
+[project.optional-dependencies]
+windows = ["pycaw>=20240210"]
+dev = [
+  "mypy>=1.17,<2",
+  "pyinstaller>=6.14,<7",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+wortava = "wortava.cli.app:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["wortava"]
