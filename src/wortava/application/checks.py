@@ -1,23 +1,18 @@
-from collections.abc import Awaitable, Callable
-from functools import partial
-from typing import Protocol, cast
-
-from wortava.application.runner import Check, Evaluation
+from wortava.application.runner import Check, CheckOperation, Evaluation, ValidationRun
 from wortava.config.models import ProcessExpectation, Settings
 from wortava.domain.models import Evidence, Status, Subsystem
-from wortava.ports.probes import AudioEndpoint, MixerObservation, ObsObservation, ProcessObservation
+from wortava.ports.probes import (
+    AudioEndpoint,
+    AudioProbe,
+    MixerObservation,
+    MixerProbe,
+    ObsObservation,
+    ObsProbe,
+    ProcessObservation,
+    ProcessProbe,
+)
 
 _DEFAULT_TIMEOUT_SECONDS = 2.0
-
-
-class _ValidationProbes(Protocol):
-    async def inspect_processes(self) -> tuple[ProcessObservation, ...]: ...
-
-    async def inspect_obs(self) -> ObsObservation: ...
-
-    async def inspect_mixer(self) -> MixerObservation: ...
-
-    async def inspect_audio(self) -> tuple[AudioEndpoint, ...]: ...
 
 
 def evaluate_process(
@@ -120,34 +115,64 @@ def evaluate_audio_endpoint(
     return Status.PASS, f"Expected {direction} endpoint is active", evidence
 
 
-def _object_operation(
-    operation: Callable[[], Awaitable[object]],
-) -> Callable[[], Awaitable[object]]:
+def _process_operation(probe: ProcessProbe, expectation: ProcessExpectation) -> CheckOperation:
+    async def operation(run: ValidationRun) -> Evaluation:
+        return evaluate_process(await run.processes(probe), expectation)
+
     return operation
 
 
-def _object_evaluator(evaluate: Callable[[object], Evaluation]) -> Callable[[object], Evaluation]:
-    return evaluate
+def _obs_connection_operation(probe: ObsProbe) -> CheckOperation:
+    async def operation(run: ValidationRun) -> Evaluation:
+        return evaluate_obs_connection(await run.obs(probe))
+
+    return operation
 
 
-def build_checks(settings: Settings, probes: _ValidationProbes) -> tuple[Check, ...]:
-    process_operation = _object_operation(probes.inspect_processes)
-    obs_operation = _object_operation(probes.inspect_obs)
-    mixer_operation = _object_operation(probes.inspect_mixer)
-    audio_operation = _object_operation(probes.inspect_audio)
+def _obs_scene_operation(probe: ObsProbe, expected_scene: str | None) -> CheckOperation:
+    async def operation(run: ValidationRun) -> Evaluation:
+        return evaluate_obs_scene(await run.obs(probe), expected_scene)
+
+    return operation
+
+
+def _virtual_camera_operation(probe: ObsProbe) -> CheckOperation:
+    async def operation(run: ValidationRun) -> Evaluation:
+        return evaluate_virtual_camera(await run.obs(probe))
+
+    return operation
+
+
+def _mixer_operation(probe: MixerProbe) -> CheckOperation:
+    async def operation(run: ValidationRun) -> Evaluation:
+        return evaluate_mixer(await run.mixer(probe))
+
+    return operation
+
+
+def _audio_operation(
+    probe: AudioProbe, expected_endpoint: str | None, direction: str
+) -> CheckOperation:
+    async def operation(run: ValidationRun) -> Evaluation:
+        return evaluate_audio_endpoint(await run.audio(probe), expected_endpoint, direction)
+
+    return operation
+
+
+def build_checks(
+    settings: Settings,
+    process_probe: ProcessProbe,
+    obs_probe: ObsProbe,
+    mixer_probe: MixerProbe,
+    audio_probe: AudioProbe,
+) -> tuple[Check, ...]:
 
     checks = [
         Check(
             f"system.process.{index}.{expectation.name}",
             Subsystem.SYSTEM,
             _DEFAULT_TIMEOUT_SECONDS,
-            process_operation,
-            _object_evaluator(
-                cast(
-                    Callable[[object], Evaluation],
-                    partial(evaluate_process, expectation=expectation),
-                )
-            ),
+            _process_operation(process_probe, expectation),
         )
         for index, expectation in enumerate(settings.processes)
     ]
@@ -157,65 +182,44 @@ def build_checks(settings: Settings, probes: _ValidationProbes) -> tuple[Check, 
                 "obs.connection",
                 Subsystem.OBS,
                 settings.obs.timeout_seconds,
-                obs_operation,
-                _object_evaluator(cast(Callable[[object], Evaluation], evaluate_obs_connection)),
+                _obs_connection_operation(obs_probe),
             ),
             Check(
                 "obs.scene",
                 Subsystem.OBS,
                 settings.obs.timeout_seconds,
-                obs_operation,
-                _object_evaluator(
-                    cast(
-                        Callable[[object], Evaluation],
-                        partial(evaluate_obs_scene, expected_scene=settings.obs.expected_scene),
-                    )
-                ),
+                _obs_scene_operation(obs_probe, settings.obs.expected_scene),
             ),
             Check(
                 "obs.virtual_camera",
                 Subsystem.OBS,
                 settings.obs.timeout_seconds,
-                obs_operation,
-                _object_evaluator(cast(Callable[[object], Evaluation], evaluate_virtual_camera)),
+                _virtual_camera_operation(obs_probe),
             ),
             Check(
                 "mixer.connection",
                 Subsystem.MIXER,
                 settings.mixer.timeout_seconds,
-                mixer_operation,
-                _object_evaluator(cast(Callable[[object], Evaluation], evaluate_mixer)),
+                _mixer_operation(mixer_probe),
             ),
             Check(
                 "audio.render",
                 Subsystem.AUDIO,
                 _DEFAULT_TIMEOUT_SECONDS,
-                audio_operation,
-                _object_evaluator(
-                    cast(
-                        Callable[[object], Evaluation],
-                        partial(
-                            evaluate_audio_endpoint,
-                            expected_endpoint=settings.audio.expected_render_endpoint,
-                            direction="render",
-                        ),
-                    )
+                _audio_operation(
+                    audio_probe,
+                    settings.audio.expected_render_endpoint,
+                    "render",
                 ),
             ),
             Check(
                 "audio.capture",
                 Subsystem.AUDIO,
                 _DEFAULT_TIMEOUT_SECONDS,
-                audio_operation,
-                _object_evaluator(
-                    cast(
-                        Callable[[object], Evaluation],
-                        partial(
-                            evaluate_audio_endpoint,
-                            expected_endpoint=settings.audio.expected_capture_endpoint,
-                            direction="capture",
-                        ),
-                    )
+                _audio_operation(
+                    audio_probe,
+                    settings.audio.expected_capture_endpoint,
+                    "capture",
                 ),
             ),
         )

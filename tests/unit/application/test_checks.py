@@ -1,3 +1,8 @@
+import asyncio
+from dataclasses import dataclass
+
+import pytest
+
 from wortava.adapters.simulated import SimulatedProbes
 from wortava.application.checks import (
     build_checks,
@@ -8,6 +13,7 @@ from wortava.application.checks import (
     evaluate_process,
     evaluate_virtual_camera,
 )
+from wortava.application.runner import run_validation
 from wortava.config.models import (
     AudioSettings,
     MixerSettings,
@@ -16,7 +22,7 @@ from wortava.config.models import (
     Settings,
 )
 from wortava.domain.models import Status
-from wortava.ports.probes import AudioEndpoint, MixerObservation, ObsObservation
+from wortava.ports.probes import AudioEndpoint, MixerObservation, ObsObservation, ProcessObservation
 
 
 def test_unconfigured_mixer_is_unknown() -> None:
@@ -64,10 +70,81 @@ def test_build_checks_uses_unique_names_and_configured_timeouts() -> None:
     )
     probes = SimulatedProbes({})
 
-    checks = build_checks(settings, probes)
+    checks = build_checks(settings, probes, probes, probes, probes)
 
     assert len({check.name for check in checks}) == len(checks)
     assert {check.timeout_seconds for check in checks if check.subsystem.value == "obs"} == {1.25}
     assert (
         next(check for check in checks if check.name == "mixer.connection").timeout_seconds == 3.5
     )
+
+
+@dataclass
+class CountingProbes:
+    process_calls: int = 0
+    obs_calls: int = 0
+    mixer_calls: int = 0
+    audio_calls: int = 0
+    fail_obs: bool = False
+
+    async def inspect_processes(self) -> tuple[ProcessObservation, ...]:
+        self.process_calls += 1
+        return (
+            ProcessObservation("one", True, True, 1, None, None),
+            ProcessObservation("two", True, True, 2, None, None),
+        )
+
+    async def inspect_obs(self) -> ObsObservation:
+        self.obs_calls += 1
+        await asyncio.sleep(0)
+        if self.fail_obs:
+            raise RuntimeError("token=vendor-secret")
+        return ObsObservation(True, "Expected", True)
+
+    async def inspect_mixer(self) -> MixerObservation:
+        self.mixer_calls += 1
+        return MixerObservation(False, None, None, None)
+
+    async def inspect_audio(self) -> tuple[AudioEndpoint, ...]:
+        self.audio_calls += 1
+        return ()
+
+
+@pytest.mark.asyncio
+async def test_built_checks_share_each_snapshot_once_per_run() -> None:
+    probes = CountingProbes()
+    settings = Settings(
+        processes=(ProcessExpectation(name="one"), ProcessExpectation(name="two")),
+        obs=ObsSettings(expected_scene="Expected"),
+    )
+    checks = build_checks(settings, probes, probes, probes, probes)
+
+    first = await run_validation(checks, "first")
+    second = await run_validation(checks, "second")
+
+    assert all(item.error_category is None for item in first.results)
+    assert all(item.error_category is None for item in second.results)
+    assert (probes.process_calls, probes.obs_calls, probes.mixer_calls, probes.audio_calls) == (
+        2,
+        2,
+        2,
+        2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_shared_snapshot_failure_is_sanitized_for_dependents() -> None:
+    probes = CountingProbes(fail_obs=True)
+    checks = build_checks(Settings(), probes, probes, probes, probes)
+
+    report = await run_validation(checks, "failure")
+
+    obs_results = [item for item in report.results if item.subsystem.value == "obs"]
+    assert probes.obs_calls == 1
+    assert len(obs_results) == 3
+    assert all(item.status is Status.UNKNOWN for item in obs_results)
+    assert all(item.error_category == "unexpected" for item in obs_results)
+    assert all("secret" not in repr(item) for item in obs_results)
+    unrelated = [item for item in report.results if item.subsystem.value != "obs"]
+    assert unrelated
+    assert all(item.error_category is None for item in unrelated)
