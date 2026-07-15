@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "run_id": "run-fixed",
+  "started_at": "2026-07-15T12:00:00+00:00",
+  "exit_code": 0,
+  "summary": {"PASS": 1, "FAIL": 0, "WARN": 0, "UNKNOWN": 0},
+  "results": [
+    {
+      "check_id": "obs.connection",
+      "subsystem": "obs",
+      "status": "PASS",
+      "summary": "OBS connection succeeded",
+      "evidence": {"connected": true},
+      "remediation": null,
+      "duration_ms": 4,
+      "checked_at": "2026-07-15T12:00:01+00:00",
+      "error_category": null
+    }
+  ]
+}
