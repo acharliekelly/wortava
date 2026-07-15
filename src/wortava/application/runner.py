@@ -49,6 +49,17 @@ class ValidationRun:
             self._audio = asyncio.create_task(probe.inspect_audio())
         return await asyncio.shield(self._audio)
 
+    async def close(self) -> None:
+        tasks = tuple(
+            task
+            for task in (self._processes, self._obs, self._mixer, self._audio)
+            if task is not None
+        )
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
 
 @dataclass(frozen=True, slots=True)
 class Check:
@@ -89,5 +100,8 @@ async def _run_one(check: Check, run: ValidationRun) -> CheckResult:
 async def run_validation(checks: tuple[Check, ...], run_id: str) -> ValidationReport:
     started_at = datetime.now(UTC)
     run = ValidationRun()
-    results = await asyncio.gather(*(_run_one(check, run) for check in checks))
+    try:
+        results = await asyncio.gather(*(_run_one(check, run) for check in checks))
+    finally:
+        await run.close()
     return ValidationReport("1.0", run_id, started_at, tuple(results))

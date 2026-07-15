@@ -91,3 +91,38 @@ async def test_consumer_timeout_does_not_cancel_shared_acquisition() -> None:
 
     assert probe.calls == 1
     assert [item.status for item in report.results] == [Status.UNKNOWN, Status.PASS]
+
+
+@pytest.mark.asyncio
+async def test_all_consumer_timeouts_cancel_and_join_shared_acquisition() -> None:
+    class HangingObsProbe:
+        task: asyncio.Task[object] | None = None
+        cancelled = asyncio.Event()
+
+        async def inspect_obs(self) -> ObsObservation:
+            self.task = asyncio.current_task()
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+            return ObsObservation(True, None, None)
+
+    probe = HangingObsProbe()
+
+    async def consume_obs(run: ValidationRun) -> Evaluation:
+        await run.obs(probe)
+        return Status.PASS, "ok", ()
+
+    checks = (
+        Check("first", Subsystem.OBS, 0.01, consume_obs),
+        Check("second", Subsystem.OBS, 0.02, consume_obs),
+    )
+
+    report = await run_validation(checks, "all-timeout")
+
+    assert [item.status for item in report.results] == [Status.UNKNOWN, Status.UNKNOWN]
+    assert probe.cancelled.is_set()
+    assert probe.task is not None
+    assert probe.task.done()
+    assert probe.task.cancelled()
