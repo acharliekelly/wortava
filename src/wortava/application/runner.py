@@ -22,6 +22,17 @@ type Evaluation = tuple[Status, str, tuple[Evidence, ...]]
 type CheckOperation = Callable[["ValidationRun"], Awaitable[Evaluation]]
 
 
+def _null_logger() -> logging.Logger:
+    logger = logging.getLogger("wortava.null")
+    logger.setLevel(logging.CRITICAL + 1)
+    logger.propagate = False
+    for handler in tuple(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+    logger.addHandler(logging.NullHandler())
+    return logger
+
+
 class ValidationRun:
     """Owns lazy subsystem snapshots for exactly one validation run."""
 
@@ -134,7 +145,7 @@ async def run_validation(
 ) -> ValidationReport:
     started_at = datetime.now(UTC)
     run = ValidationRun()
-    run_logger = logger or logging.getLogger("wortava.null")
+    run_logger = logger or _null_logger()
     try:
         results = await asyncio.gather(*(_run_one(check, run, run_logger) for check in checks))
     finally:

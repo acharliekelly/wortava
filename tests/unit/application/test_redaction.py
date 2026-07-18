@@ -1,4 +1,6 @@
 import json
+import logging
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -47,3 +49,28 @@ async def test_obs_failure_password_is_absent_from_reports_and_log(tmp_path: Pat
     ]
     assert events[-1]["error_category"] == "unexpected"
     assert events[1]["exception_class"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_missing_logger_never_propagates_unexpected_secret_to_root() -> None:
+    password = "super-secret"
+
+    async def broken(_: object) -> Evaluation:
+        raise RuntimeError(password)
+
+    stream = StringIO()
+    root_handler = logging.StreamHandler(stream)
+    root = logging.getLogger()
+    root.addHandler(root_handler)
+    try:
+        report = await run_validation(
+            (Check("obs.connection", Subsystem.OBS, 1, broken),),
+            "no-logger",
+            None,
+        )
+    finally:
+        root.removeHandler(root_handler)
+        root_handler.close()
+
+    assert report.results[0].error_category == "unexpected"
+    assert stream.getvalue() == ""

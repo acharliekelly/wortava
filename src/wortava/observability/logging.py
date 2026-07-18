@@ -1,7 +1,7 @@
 import json
 import logging
 import traceback
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -29,19 +29,17 @@ class RedactingFilter(logging.Filter):
         return value
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = self._redact(record.msg)
-        if isinstance(record.args, tuple):
-            record.args = tuple(
-                self._redact(value) if isinstance(value, str) else value for value in record.args
-            )
-        elif isinstance(record.args, Mapping):
-            record.args = {
-                key: self._redact(value) if isinstance(value, str) else value
-                for key, value in record.args.items()
-            }
+        try:
+            rendered_message = record.getMessage()
+        except Exception:
+            rendered_message = "Unrenderable log message"
+        record.msg = self._redact(rendered_message)
+        record.args = ()
         if record.exc_info is not None:
-            rendered = "".join(traceback.format_exception(*record.exc_info))
+            try:
+                rendered = "".join(traceback.format_exception(*record.exc_info))
+            except Exception:
+                rendered = "Exception details unavailable"
             record.exc_text = self._redact(rendered)
             record.exc_info = None
         elif record.exc_text is not None:
@@ -65,7 +63,9 @@ class JsonLinesFormatter(logging.Formatter):
             "event": getattr(record, "event", None),
             "duration_ms": getattr(record, "duration_ms", None),
             "error_category": getattr(record, "error_category", None),
-            "message": record.getMessage(),
+            "message": (
+                record.msg if isinstance(record.msg, str) else "Unrenderable log message"
+            ),
         }
         exception_class = getattr(record, "exception_class", None)
         if exception_class is not None:
