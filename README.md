@@ -5,6 +5,8 @@ queries expected processes, OBS, an X Air mixer, and Windows audio endpoints, th
 human-readable report or versioned JSON. Fixture-backed simulations let developers and
 operators learn the workflow without church hardware.
 
+Further information about the current system can be found [here](docs/developer-handbook/01-current-state.md).
+
 ## Safety boundary
 
 Milestone one only observes state. It does not start or stop applications, change OBS scenes,
