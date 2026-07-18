@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import sys
 import tomllib
 import uuid
 from enum import StrEnum
@@ -60,6 +61,8 @@ def _error(prefix: str, error: Exception, *, plain: bool = False) -> NoReturn:
 
 
 def _default_settings_path() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "config" / "defaults.toml"  # type: ignore[attr-defined]
     return Path(__file__).resolve().parents[3] / "config" / "defaults.toml"
 
 

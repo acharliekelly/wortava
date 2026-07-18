@@ -130,13 +130,26 @@ commands must remain deterministic, hardware-free, and successful.
 
 ## Windows build
 
-The standalone Windows artifact is the next delivery task. Its planned build uses PyInstaller
-with a Windows-specific specification and packaged-CLI acceptance test. Until those files land,
-run from the locked `uv` environment; do not infer that a portable executable already exists.
+Each successful GitHub Actions CI run publishes the onedir artifact `wortava-windows-x64` from
+the `Windows package` job. Open the repository's Actions page, select the commit's completed CI
+run, and download `wortava-windows-x64` from its Artifacts section. Extract the entire `wortava`
+directory, keep its files together, and run `wortava/wortava.exe`; the executable depends on the
+adjacent files in that directory. Verify it against the included `SHA256SUMS.txt` before use.
+
+To build the same layout on Windows from a checkout:
+
+```console
+> uv sync --extra dev --extra windows
+> uv run pyinstaller wortava.spec --clean
+> uv run pytest tests/acceptance/test_packaged_cli.py --run-windows-package -q
+```
+
+The output executable is `dist/wortava/wortava.exe`. A normal `pytest` run skips the packaged
+smoke test; the explicit flag requires the executable and reports how to build it when absent.
 
 ## Roadmap
 
-- Package and verify the standalone Windows artifact in Windows CI.
+- Download and field-test the CI-built artifact on the church workstation.
 - Complete on-site discovery and replace example profile values with sanitized confirmed facts.
 - Keep mutation and automation out of milestone one; consider later controls only through a
   separately reviewed, explicit safety design and supported vendor APIs.
