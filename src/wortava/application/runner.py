@@ -14,6 +14,7 @@ from wortava.ports.probes import (
     ObsProbe,
     ProcessObservation,
     ProcessProbe,
+    UnsupportedPlatform,
 )
 
 type Evaluation = tuple[Status, str, tuple[Evidence, ...]]
@@ -79,6 +80,11 @@ async def _run_one(check: Check, run: ValidationRun) -> CheckResult:
         category = None
     except TimeoutError:
         status, summary, evidence, category = Status.UNKNOWN, "Check timed out", (), "timeout"
+    except UnsupportedPlatform:
+        status = Status.UNKNOWN
+        summary = "Check is unsupported on this platform"
+        evidence = ()
+        category = "unsupported_platform"
     except Exception:
         status = Status.UNKNOWN
         summary = "Check could not determine state"

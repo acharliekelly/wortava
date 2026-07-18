@@ -13,23 +13,32 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from wortava.adapters.obs.client import ObsWebSocketProbe
 from wortava.adapters.simulated import SimulatedProbes
+from wortava.adapters.windows.audio import WindowsAudioProbe
+from wortava.adapters.windows.process import WindowsProcessProbe
+from wortava.adapters.xair.client import XAirOscProbe
 from wortava.application.checks import build_checks
 from wortava.application.runner import run_validation
 from wortava.cli.reporters import render_terminal, report_to_dict
 from wortava.config.loader import load_settings
 from wortava.config.models import Settings
 from wortava.domain.models import ValidationReport
-from wortava.ports.probes import AudioProbe, MixerProbe, ObsProbe, ProcessProbe
+from wortava.ports.probes import (
+    AudioEndpoint,
+    AudioProbe,
+    MixerObservation,
+    MixerProbe,
+    ObsObservation,
+    ObsProbe,
+    ProcessObservation,
+    ProcessProbe,
+)
 
 
 class OutputFormat(StrEnum):
     TERMINAL = "terminal"
     JSON = "json"
-
-
-class AdapterUnavailableError(RuntimeError):
-    """Raised until the real, read-only adapter implementations are available."""
 
 
 class ProbeSuite(ProcessProbe, ObsProbe, MixerProbe, AudioProbe, Protocol):
@@ -72,8 +81,28 @@ def _load_scenario(name: str) -> tuple[Settings, SimulatedProbes]:
     return settings, SimulatedProbes(data)
 
 
-def _real_probes(_: Settings) -> ProbeSuite:
-    raise AdapterUnavailableError("real adapters are not available in this build")
+class RealProbeSuite:
+    def __init__(self, settings: Settings) -> None:
+        self._process = WindowsProcessProbe(settings.processes)
+        self._obs = ObsWebSocketProbe(settings.obs)
+        self._mixer = XAirOscProbe(settings.mixer)
+        self._audio = WindowsAudioProbe()
+
+    async def inspect_processes(self) -> tuple[ProcessObservation, ...]:
+        return await self._process.inspect_processes()
+
+    async def inspect_obs(self) -> ObsObservation:
+        return await self._obs.inspect_obs()
+
+    async def inspect_mixer(self) -> MixerObservation:
+        return await self._mixer.inspect_mixer()
+
+    async def inspect_audio(self) -> tuple[AudioEndpoint, ...]:
+        return await self._audio.inspect_audio()
+
+
+def _real_probes(settings: Settings) -> ProbeSuite:
+    return RealProbeSuite(settings)
 
 
 def _run(settings: Settings, probes: ProbeSuite) -> ValidationReport:
@@ -135,8 +164,6 @@ def validate_system(
         _render(report, output_format, output, plain=plain)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
         _error("Configuration error", error, plain=plain)
-    except AdapterUnavailableError as error:
-        _error("Adapter error", error, plain=plain)
     raise typer.Exit(report.exit_code)
 
 

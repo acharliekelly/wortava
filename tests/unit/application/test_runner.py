@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from wortava.adapters.windows.audio import UnsupportedPlatform
 from wortava.application.runner import Check, Evaluation, ValidationRun, run_validation
 from wortava.domain.models import Status, Subsystem
 from wortava.ports.probes import ObsObservation
@@ -44,6 +45,21 @@ async def test_exception_is_sanitized_and_other_checks_complete() -> None:
     assert report.results[0].summary == "Check could not determine state"
     assert report.results[0].error_category == "unexpected"
     assert "secret" not in repr(report.results[0])
+
+
+@pytest.mark.asyncio
+async def test_unsupported_platform_is_sanitized_with_stable_category() -> None:
+    async def unsupported(_: object) -> Evaluation:
+        raise UnsupportedPlatform("host detail")
+
+    report = await run_validation(
+        (Check("audio", Subsystem.AUDIO, 1, unsupported),), "unsupported-platform"
+    )
+
+    assert report.results[0].status is Status.UNKNOWN
+    assert report.results[0].summary == "Check is unsupported on this platform"
+    assert report.results[0].error_category == "unsupported_platform"
+    assert "host detail" not in repr(report.results[0])
 
 
 @pytest.mark.asyncio

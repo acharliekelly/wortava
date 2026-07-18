@@ -4,10 +4,32 @@ from typing import Any
 
 from typer.testing import CliRunner
 
+from wortava.adapters.obs.client import ObsWebSocketProbe
+from wortava.adapters.windows.process import WindowsProcessProbe
+from wortava.adapters.xair.client import XAirOscProbe
 from wortava.cli import app as cli_app
 from wortava.cli.app import app
+from wortava.ports.probes import MixerObservation, ObsObservation, ProcessObservation
 
 runner = CliRunner()
+
+
+def stub_threaded_real_probes(monkeypatch: Any) -> None:
+    async def processes(probe: WindowsProcessProbe) -> tuple[ProcessObservation, ...]:
+        return tuple(
+            ProcessObservation(item.name, None, True, index, None, None)
+            for index, item in enumerate(probe._expectations, start=1)
+        )
+
+    async def obs(_: ObsWebSocketProbe) -> ObsObservation:
+        return ObsObservation(True, None, None)
+
+    async def mixer(_: XAirOscProbe) -> MixerObservation:
+        return MixerObservation(False, None, None, None)
+
+    monkeypatch.setattr(WindowsProcessProbe, "inspect_processes", processes)
+    monkeypatch.setattr(ObsWebSocketProbe, "inspect_obs", obs)
+    monkeypatch.setattr(XAirOscProbe, "inspect_mixer", mixer)
 
 
 def test_simulate_all_pass_emits_json_and_zero_exit() -> None:
@@ -54,12 +76,18 @@ def test_config_validate_accepts_valid_profile() -> None:
     assert "Configuration is valid" in result.stdout
 
 
-def test_validate_reports_unavailable_real_adapters_on_stderr() -> None:
+def test_validate_composes_real_adapters_and_reports_unsupported_audio(
+    monkeypatch: Any,
+) -> None:
+    stub_threaded_real_probes(monkeypatch)
     result = runner.invoke(app, ["validate", "--format", "json"])
 
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "Adapter error:" in result.stderr
+    assert result.exit_code == 0
+    document = json.loads(result.stdout)
+    audio = [item for item in document["results"] if item["subsystem"] == "audio"]
+    assert {item["status"] for item in audio} == {"UNKNOWN"}
+    assert {item["error_category"] for item in audio} == {"unsupported_platform"}
+    assert result.stderr == ""
 
 
 def test_json_output_file_keeps_stdout_empty(tmp_path: Path) -> None:
@@ -94,12 +122,13 @@ def test_simulate_plain_terminal_has_no_ansi_sequences() -> None:
     assert "PASS" in result.stdout
 
 
-def test_validate_accepts_plain_terminal_option() -> None:
+def test_validate_accepts_plain_terminal_option(monkeypatch: Any) -> None:
+    stub_threaded_real_probes(monkeypatch)
     result = runner.invoke(app, ["validate", "--plain"])
 
-    assert result.exit_code == 2
-    assert "\x1b[" not in result.stderr
-    assert "Adapter error:" in result.stderr
+    assert result.exit_code == 0
+    assert "\x1b[" not in result.stdout
+    assert "UNKNOWN" in result.stdout
 
 
 def test_packaged_scenario_is_read_directly_from_traversable(monkeypatch: Any) -> None:

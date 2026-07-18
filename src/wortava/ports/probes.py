@@ -2,6 +2,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class UnsupportedPlatform(RuntimeError):
+    """The requested probe is unavailable on the current operating system."""
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessObservation:
     name: str
