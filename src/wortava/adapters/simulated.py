@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from wortava.adapters.xair.client import MixerProtocolError, MixerUnavailable
 from wortava.ports.probes import (
     AudioEndpoint,
     MixerObservation,
@@ -33,6 +34,11 @@ class SimulatedProbes:
 
     async def inspect_mixer(self) -> MixerObservation:
         await self._delay("mixer")
+        directive = self.data.get("mixer", {}).get("error")
+        if directive == "unavailable":
+            raise MixerUnavailable("Simulated mixer nonresponse")
+        if directive == "malformed":
+            raise MixerProtocolError("Simulated malformed mixer response")
         return MixerObservation(**self.data["mixer"]["observation"])
 
     async def inspect_audio(self) -> tuple[AudioEndpoint, ...]:

@@ -96,6 +96,9 @@ queries. Keep two separate artifacts:
 - Every active capture endpoint's complete endpoint ID and friendly name.
 - Which endpoint holds the default multimedia role and which holds the default communications
   role for both render and capture.
+- Whether each confirmed endpoint is expected to hold each role; record these booleans as
+  `expected_<direction>_default_multimedia` and
+  `expected_<direction>_default_communications` in the site profile.
 - Per-application routing observations for OBS, Zoom, X Air Edit, and other service-critical apps:
   selected input/output or system default, and whether the assignment is observable or unknown.
 - Results of the physical signal test below, including each step's expected and actual outcome.

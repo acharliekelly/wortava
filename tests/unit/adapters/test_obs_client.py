@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from wortava.adapters.obs import client as obs_client
 from wortava.adapters.obs.client import ObsAdapterError, ObsWebSocketProbe
 from wortava.config.models import ObsSettings
 from wortava.ports.probes import ObsObservation
@@ -78,3 +79,30 @@ async def test_obs_connection_error_is_typed_and_redacts_password() -> None:
     assert password not in repr(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_default_obs_client_uses_bounded_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = ObsObservation(True, "Worship", True)
+    calls: list[tuple[Any, tuple[Any, ...], float]] = []
+
+    async def run_worker(target: Any, arguments: tuple[Any, ...], *, timeout_seconds: float) -> Any:
+        calls.append((target, arguments, timeout_seconds))
+        return expected
+
+    monkeypatch.setattr(obs_client, "run_in_spawned_process", run_worker)
+    probe = ObsWebSocketProbe(ObsSettings(timeout_seconds=2.0))
+    assert await probe.inspect_obs() == expected
+    assert calls[0][0] is obs_client._inspect_obs_worker
+    assert calls[0][2] == 1.8
+
+
+@pytest.mark.asyncio
+async def test_default_obs_worker_failure_remains_typed(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fail_worker(*_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError("secret vendor detail")
+
+    monkeypatch.setattr(obs_client, "run_in_spawned_process", fail_worker)
+    probe = ObsWebSocketProbe(ObsSettings())
+    with pytest.raises(ObsAdapterError, match="Unable to read OBS status"):
+        await probe.inspect_obs()

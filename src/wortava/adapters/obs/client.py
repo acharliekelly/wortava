@@ -1,9 +1,10 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import obsws_python  # type: ignore[import-untyped]
 
+from wortava.adapters.windows.worker import run_in_spawned_process
 from wortava.config.models import ObsSettings
 from wortava.ports.probes import ObsObservation
 
@@ -36,8 +37,21 @@ class ObsWebSocketProbe:
         self._settings = settings
         self._client_factory = client_factory
         self._run_sync = run_sync
+        self._uses_default_worker = (
+            client_factory is obsws_python.ReqClient and run_sync is _run_in_thread
+        )
 
     async def inspect_obs(self) -> ObsObservation:
+        if self._uses_default_worker:
+            try:
+                result = await run_in_spawned_process(
+                    _inspect_obs_worker,
+                    (self._settings,),
+                    timeout_seconds=max(0.01, self._settings.timeout_seconds * 0.9),
+                )
+                return cast(ObsObservation, result)
+            except (RuntimeError, TimeoutError) as error:
+                raise ObsAdapterError("Unable to read OBS status") from error
         return await self._run_sync(self._inspect_obs_sync)
 
     def _inspect_obs_sync(self) -> ObsObservation:
@@ -79,3 +93,7 @@ class ObsWebSocketProbe:
         if failed or observation is None:
             raise ObsAdapterError("Unable to read OBS status")
         return observation
+
+
+def _inspect_obs_worker(settings: ObsSettings) -> ObsObservation:
+    return ObsWebSocketProbe(settings, run_sync=_run_in_thread)._inspect_obs_sync()

@@ -1,4 +1,12 @@
-from wortava.application.runner import Check, CheckOperation, Evaluation, ValidationRun
+from wortava.adapters.obs.client import ObsAdapterError
+from wortava.adapters.xair.client import MixerProtocolError, MixerUnavailable
+from wortava.application.runner import (
+    Check,
+    CheckOperation,
+    Evaluation,
+    ExpectedCheckOutcome,
+    ValidationRun,
+)
 from wortava.config.models import ProcessExpectation, Settings
 from wortava.domain.models import Evidence, Status, Subsystem
 from wortava.ports.probes import (
@@ -25,11 +33,16 @@ def evaluate_process(
         Evidence("expected_name", expectation.name),
         Evidence("expected_executable", expectation.executable),
         Evidence("running", matching.running if matching else False),
+        Evidence("installed", matching.installed if matching else None),
         Evidence("pid", matching.pid if matching else None),
         Evidence("version", matching.version if matching else None),
     )
     if matching is None:
+        if not expectation.required:
+            return Status.WARN, f"Optional process {expectation.name} was not found", evidence
         return Status.FAIL, f"Expected process {expectation.name} was not found", evidence
+    if matching.installed is False:
+        return Status.FAIL, f"Expected process {expectation.name} is not installed", evidence
     if not matching.running:
         return Status.FAIL, f"Expected process {expectation.name} is not running", evidence
     if expected_executable is not None and (
@@ -87,7 +100,11 @@ def evaluate_mixer(value: MixerObservation) -> Evaluation:
 
 
 def evaluate_audio_endpoint(
-    values: tuple[AudioEndpoint, ...], expected_endpoint: str | None, direction: str
+    values: tuple[AudioEndpoint, ...],
+    expected_endpoint: str | None,
+    direction: str,
+    expected_default_multimedia: bool | None = None,
+    expected_default_communications: bool | None = None,
 ) -> Evaluation:
     matching = next(
         (
@@ -105,6 +122,8 @@ def evaluate_audio_endpoint(
         Evidence("expected_endpoint", expected_endpoint),
         Evidence("endpoint_id", matching.endpoint_id if matching else None),
         Evidence("active", matching.active if matching else None),
+        Evidence("default_multimedia", matching.default_multimedia if matching else None),
+        Evidence("default_communications", matching.default_communications if matching else None),
     )
     if expected_endpoint is None:
         return Status.UNKNOWN, f"Expected {direction} endpoint is not configured", evidence
@@ -112,6 +131,24 @@ def evaluate_audio_endpoint(
         return Status.FAIL, f"Expected {direction} endpoint was not found", evidence
     if not matching.active:
         return Status.FAIL, f"Expected {direction} endpoint is not active", evidence
+    if (
+        expected_default_multimedia is not None
+        and matching.default_multimedia is not expected_default_multimedia
+    ):
+        return (
+            Status.FAIL,
+            f"Expected {direction} endpoint multimedia role does not match",
+            evidence,
+        )
+    if (
+        expected_default_communications is not None
+        and matching.default_communications is not expected_default_communications
+    ):
+        return (
+            Status.FAIL,
+            f"Expected {direction} endpoint communications role does not match",
+            evidence,
+        )
     return Status.PASS, f"Expected {direction} endpoint is active", evidence
 
 
@@ -124,37 +161,72 @@ def _process_operation(probe: ProcessProbe, expectation: ProcessExpectation) -> 
 
 def _obs_connection_operation(probe: ObsProbe) -> CheckOperation:
     async def operation(run: ValidationRun) -> Evaluation:
-        return evaluate_obs_connection(await run.obs(probe))
+        try:
+            return evaluate_obs_connection(await run.obs(probe))
+        except ObsAdapterError as error:
+            raise ExpectedCheckOutcome(
+                (Status.FAIL, "OBS connection failed", ()), "obs_unavailable"
+            ) from error
 
     return operation
 
 
 def _obs_scene_operation(probe: ObsProbe, expected_scene: str | None) -> CheckOperation:
     async def operation(run: ValidationRun) -> Evaluation:
-        return evaluate_obs_scene(await run.obs(probe), expected_scene)
+        try:
+            return evaluate_obs_scene(await run.obs(probe), expected_scene)
+        except ObsAdapterError as error:
+            raise ExpectedCheckOutcome(
+                (Status.FAIL, "OBS connection failed", ()), "obs_unavailable"
+            ) from error
 
     return operation
 
 
 def _virtual_camera_operation(probe: ObsProbe) -> CheckOperation:
     async def operation(run: ValidationRun) -> Evaluation:
-        return evaluate_virtual_camera(await run.obs(probe))
+        try:
+            return evaluate_virtual_camera(await run.obs(probe))
+        except ObsAdapterError as error:
+            raise ExpectedCheckOutcome(
+                (Status.FAIL, "OBS connection failed", ()), "obs_unavailable"
+            ) from error
 
     return operation
 
 
 def _mixer_operation(probe: MixerProbe) -> CheckOperation:
     async def operation(run: ValidationRun) -> Evaluation:
-        return evaluate_mixer(await run.mixer(probe))
+        try:
+            return evaluate_mixer(await run.mixer(probe))
+        except MixerUnavailable as error:
+            raise ExpectedCheckOutcome(
+                (Status.FAIL, "Configured mixer did not respond", ()), "mixer_unavailable"
+            ) from error
+        except MixerProtocolError as error:
+            raise ExpectedCheckOutcome(
+                (Status.UNKNOWN, "Mixer response could not be interpreted", ()),
+                "mixer_protocol",
+            ) from error
 
     return operation
 
 
 def _audio_operation(
-    probe: AudioProbe, expected_endpoint: str | None, direction: str
+    probe: AudioProbe,
+    expected_endpoint: str | None,
+    direction: str,
+    expected_default_multimedia: bool | None,
+    expected_default_communications: bool | None,
 ) -> CheckOperation:
     async def operation(run: ValidationRun) -> Evaluation:
-        return evaluate_audio_endpoint(await run.audio(probe), expected_endpoint, direction)
+        return evaluate_audio_endpoint(
+            await run.audio(probe),
+            expected_endpoint,
+            direction,
+            expected_default_multimedia,
+            expected_default_communications,
+        )
 
     return operation
 
@@ -210,6 +282,8 @@ def build_checks(
                     audio_probe,
                     settings.audio.expected_render_endpoint,
                     "render",
+                    settings.audio.expected_render_default_multimedia,
+                    settings.audio.expected_render_default_communications,
                 ),
             ),
             Check(
@@ -220,6 +294,8 @@ def build_checks(
                     audio_probe,
                     settings.audio.expected_capture_endpoint,
                     "capture",
+                    settings.audio.expected_capture_default_multimedia,
+                    settings.audio.expected_capture_default_communications,
                 ),
             ),
         )

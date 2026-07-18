@@ -24,6 +24,10 @@ class MixerSettings(BaseModel):
 class AudioSettings(BaseModel):
     expected_render_endpoint: str | None = None
     expected_capture_endpoint: str | None = None
+    expected_render_default_multimedia: bool | None = None
+    expected_render_default_communications: bool | None = None
+    expected_capture_default_multimedia: bool | None = None
+    expected_capture_default_communications: bool | None = None
 
 
 class Settings(BaseModel):

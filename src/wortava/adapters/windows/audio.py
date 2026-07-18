@@ -3,6 +3,7 @@ import sys
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any, Protocol
 
+from wortava.adapters.windows.worker import run_in_spawned_process
 from wortava.ports.probes import AudioEndpoint, UnsupportedPlatform
 
 
@@ -71,6 +72,7 @@ class WindowsAudioProbe:
         uninitialize_com: Callable[[], Any] | None = None,
         run_sync: SyncRunner = _run_in_thread,
         platform: str | None = None,
+        worker_timeout_seconds: float = 1.5,
     ) -> None:
         self._audio_utilities = audio_utilities
         self._default_roles = default_roles
@@ -81,10 +83,25 @@ class WindowsAudioProbe:
         self._uninitialize_com = uninitialize_com
         self._run_sync = run_sync
         self._platform = platform
+        self._worker_timeout_seconds = worker_timeout_seconds
+        self._uses_default_worker = (
+            audio_utilities is None
+            and default_roles is None
+            and initialize_com is None
+            and uninitialize_com is None
+            and run_sync is _run_in_thread
+        )
 
     async def inspect_audio(self) -> AudioEndpoints:
         if (self._platform or sys.platform) != "win32":
             raise UnsupportedPlatform("Windows audio inventory is unsupported on this platform")
+        if self._uses_default_worker:
+            result = await run_in_spawned_process(
+                _inspect_audio_worker,
+                (),
+                timeout_seconds=self._worker_timeout_seconds,
+            )
+            return tuple(result)
         return await self._run_sync(self._inspect_audio_sync)
 
     def _inspect_audio_sync(self) -> AudioEndpoints:
@@ -173,3 +190,7 @@ class WindowsAudioProbe:
 
 def _enum_value(value: Any) -> Any:
     return getattr(value, "value", value)
+
+
+def _inspect_audio_worker() -> AudioEndpoints:
+    return WindowsAudioProbe(platform="win32", run_sync=_run_in_thread)._inspect_audio_sync()

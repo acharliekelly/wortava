@@ -56,8 +56,10 @@ Configuration or invocation errors exit `2` before a report is produced, so `2` 
 ## Status and compatibility rules
 
 `PASS` means an observation matched its expectation. `FAIL` means a configured and observable
-expectation was not met. `WARN` is a compatible non-failing concern. `UNKNOWN` means the check
-could not determine state or lacked a relevant expectation/platform capability. Only `FAIL`
+expectation was not met, including a configured mixer that does not respond. `WARN` is a
+compatible non-failing degraded condition such as a missing optional process. `UNKNOWN` means
+the check could not determine state or lacked a relevant expectation/platform capability; a
+malformed mixer response is unknown rather than a definite configuration failure. Only `FAIL`
 causes report exit code `1`.
 
 Consumers must use `schema_version`, tolerate object fields they do not recognize, and avoid

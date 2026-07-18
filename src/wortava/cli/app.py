@@ -54,7 +54,13 @@ app.add_typer(config_app, name="config")
 
 
 def _error(prefix: str, error: Exception, *, plain: bool = False) -> NoReturn:
-    detail = str(error).splitlines()[0]
+    if isinstance(error, ValidationError):
+        detail = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors(include_url=False, include_context=False, include_input=False)
+        )
+    else:
+        detail = str(error).splitlines()[0]
     console = Console(stderr=True, color_system=None) if plain else Console(stderr=True)
     console.print(f"{prefix}: {detail}")
     raise typer.Exit(2)

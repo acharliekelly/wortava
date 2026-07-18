@@ -22,6 +22,13 @@ type Evaluation = tuple[Status, str, tuple[Evidence, ...]]
 type CheckOperation = Callable[["ValidationRun"], Awaitable[Evaluation]]
 
 
+class ExpectedCheckOutcome(RuntimeError):
+    def __init__(self, evaluation: Evaluation, category: str) -> None:
+        super().__init__(category)
+        self.evaluation = evaluation
+        self.category = category
+
+
 def _null_logger() -> logging.Logger:
     logger = logging.getLogger("wortava.null")
     logger.setLevel(logging.CRITICAL + 1)
@@ -101,6 +108,9 @@ async def _run_one(check: Check, run: ValidationRun, logger: logging.Logger) -> 
         summary = "Check is unsupported on this platform"
         evidence = ()
         category = "unsupported_platform"
+    except ExpectedCheckOutcome as error:
+        status, summary, evidence = error.evaluation
+        category = error.category
     except Exception as error:
         status = Status.UNKNOWN
         summary = "Check could not determine state"

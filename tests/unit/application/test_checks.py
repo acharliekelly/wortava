@@ -3,7 +3,9 @@ from dataclasses import dataclass
 
 import pytest
 
+from wortava.adapters.obs.client import ObsAdapterError
 from wortava.adapters.simulated import SimulatedProbes
+from wortava.adapters.xair.client import MixerProtocolError, MixerUnavailable
 from wortava.application.checks import (
     build_checks,
     evaluate_audio_endpoint,
@@ -40,6 +42,26 @@ def test_configured_absent_process_fails() -> None:
     assert status is Status.FAIL
 
 
+def test_configured_executable_known_missing_fails_with_installation_evidence() -> None:
+    observation = ProcessObservation("obs64.exe", False, False, None, "C:/OBS/obs64.exe", None)
+    status, summary, evidence = evaluate_process(
+        (observation,), ProcessExpectation(name="obs64.exe", executable="C:/OBS/obs64.exe")
+    )
+    assert status is Status.FAIL
+    assert "not installed" in summary
+    assert next(item.value for item in evidence if item.key == "installed") is False
+
+
+def test_unobservable_installation_is_not_claimed_as_verified() -> None:
+    observation = ProcessObservation("obs64.exe", None, True, 4, None, None)
+    status, summary, evidence = evaluate_process(
+        (observation,), ProcessExpectation(name="obs64.exe")
+    )
+    assert status is Status.PASS
+    assert "running" in summary
+    assert next(item.value for item in evidence if item.key == "installed") is None
+
+
 def test_obs_connection_failure_fails() -> None:
     status, _, _ = evaluate_obs_connection(ObsObservation(False, None, None))
     assert status is Status.FAIL
@@ -59,6 +81,16 @@ def test_endpoint_absence_fails_and_absent_expectation_is_unknown() -> None:
     endpoint = AudioEndpoint("1", "Speakers", "render", True, False, False)
     assert evaluate_audio_endpoint((endpoint,), "X-AIR", "render")[0] is Status.FAIL
     assert evaluate_audio_endpoint((endpoint,), None, "render")[0] is Status.UNKNOWN
+
+
+def test_endpoint_default_role_mismatch_fails() -> None:
+    endpoint = AudioEndpoint("1", "Speakers", "render", True, False, True)
+    status, summary, evidence = evaluate_audio_endpoint(
+        (endpoint,), "Speakers", "render", expected_default_multimedia=True
+    )
+    assert status is Status.FAIL
+    assert "multimedia" in summary
+    assert next(item.value for item in evidence if item.key == "default_multimedia") is False
 
 
 def test_build_checks_uses_unique_names_and_configured_timeouts() -> None:
@@ -86,6 +118,8 @@ class CountingProbes:
     mixer_calls: int = 0
     audio_calls: int = 0
     fail_obs: bool = False
+    expected_obs_failure: bool = False
+    mixer_error: str | None = None
 
     async def inspect_processes(self) -> tuple[ProcessObservation, ...]:
         self.process_calls += 1
@@ -99,10 +133,16 @@ class CountingProbes:
         await asyncio.sleep(0)
         if self.fail_obs:
             raise RuntimeError("token=vendor-secret")
+        if self.expected_obs_failure:
+            raise ObsAdapterError("sanitized")
         return ObsObservation(True, "Expected", True)
 
     async def inspect_mixer(self) -> MixerObservation:
         self.mixer_calls += 1
+        if self.mixer_error == "unavailable":
+            raise MixerUnavailable("sanitized")
+        if self.mixer_error == "protocol":
+            raise MixerProtocolError("sanitized")
         return MixerObservation(False, None, None, None)
 
     async def inspect_audio(self) -> tuple[AudioEndpoint, ...]:
@@ -148,3 +188,40 @@ async def test_shared_snapshot_failure_is_sanitized_for_dependents() -> None:
     unrelated = [item for item in report.results if item.subsystem.value != "obs"]
     assert unrelated
     assert all(item.error_category is None for item in unrelated)
+
+
+@pytest.mark.asyncio
+async def test_expected_obs_adapter_failure_is_a_definite_failure() -> None:
+    probes = CountingProbes(expected_obs_failure=True)
+    report = await run_validation(build_checks(Settings(), probes, probes, probes, probes), "obs")
+    obs = [item for item in report.results if item.subsystem.value == "obs"]
+    assert obs
+    assert all(item.status is Status.FAIL for item in obs)
+    assert all(item.error_category == "obs_unavailable" for item in obs)
+
+
+@pytest.mark.asyncio
+async def test_configured_mixer_nonresponse_fails_but_malformed_is_unknown() -> None:
+    unavailable = CountingProbes(mixer_error="unavailable")
+    malformed = CountingProbes(mixer_error="protocol")
+    settings = Settings(mixer=MixerSettings(host="10.0.0.2"))
+    unavailable_report = await run_validation(
+        build_checks(settings, unavailable, unavailable, unavailable, unavailable), "timeout"
+    )
+    malformed_report = await run_validation(
+        build_checks(settings, malformed, malformed, malformed, malformed), "malformed"
+    )
+    unavailable_result = next(
+        x for x in unavailable_report.results if x.check_id == "mixer.connection"
+    )
+    malformed_result = next(
+        x for x in malformed_report.results if x.check_id == "mixer.connection"
+    )
+    assert (unavailable_result.status, unavailable_result.error_category) == (
+        Status.FAIL,
+        "mixer_unavailable",
+    )
+    assert (malformed_result.status, malformed_result.error_category) == (
+        Status.UNKNOWN,
+        "mixer_protocol",
+    )

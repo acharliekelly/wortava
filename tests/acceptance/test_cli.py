@@ -4,9 +4,9 @@ from typing import Any
 
 from typer.testing import CliRunner
 
-from wortava.adapters.obs.client import ObsWebSocketProbe
+from wortava.adapters.obs.client import ObsAdapterError, ObsWebSocketProbe
 from wortava.adapters.windows.process import WindowsProcessProbe
-from wortava.adapters.xair.client import XAirOscProbe
+from wortava.adapters.xair.client import MixerUnavailable, XAirOscProbe
 from wortava.cli import app as cli_app
 from wortava.cli.app import app
 from wortava.ports.probes import MixerObservation, ObsObservation, ProcessObservation
@@ -58,6 +58,41 @@ def test_simulate_unknown_hardware_emits_unknown_and_zero_exit() -> None:
     assert result.stderr == f"Diagnostic log: logs/wortava-{document['run_id']}.jsonl\n"
 
 
+def test_all_six_packaged_scenarios_have_deterministic_status_and_exit() -> None:
+    expected = {
+        "all-pass": ({"PASS"}, 0),
+        "definite-failure": ({"FAIL"}, 1),
+        "warning-degraded": ({"WARN"}, 0),
+        "unknown-hardware": ({"UNKNOWN"}, 0),
+        "timeout": ({"FAIL"}, 1),
+        "malformed-response": ({"UNKNOWN"}, 0),
+    }
+    for name, (required_statuses, exit_code) in expected.items():
+        result = runner.invoke(app, ["simulate", name, "--format", "json"])
+        assert result.exit_code == exit_code, name
+        statuses = {item["status"] for item in json.loads(result.stdout)["results"]}
+        assert required_statuses <= statuses, name
+
+
+def test_development_and_packaged_scenario_copies_are_identical() -> None:
+    fixture_root = Path("tests/fixtures/scenarios")
+    package_root = Path("src/wortava/scenarios")
+    names = {
+        "all-pass",
+        "definite-failure",
+        "warning-degraded",
+        "unknown-hardware",
+        "timeout",
+        "malformed-response",
+    }
+    assert {path.stem for path in fixture_root.glob("*.json")} == names
+    assert {path.stem for path in package_root.glob("*.json")} == names
+    for name in names:
+        assert json.loads((fixture_root / f"{name}.json").read_text()) == json.loads(
+            (package_root / f"{name}.json").read_text()
+        )
+
+
 def test_unknown_simulation_name_is_rejected_without_path_traversal() -> None:
     result = runner.invoke(app, ["simulate", "../all-pass", "--format", "json"])
 
@@ -95,6 +130,49 @@ def test_validate_composes_real_adapters_and_reports_unsupported_audio(
     assert {item["status"] for item in audio} == {"UNKNOWN"}
     assert {item["error_category"] for item in audio} == {"unsupported_platform"}
     assert result.stderr == f"Diagnostic log: logs/wortava-{document['run_id']}.jsonl\n"
+
+
+def test_real_obs_connection_failure_exits_one(monkeypatch: Any) -> None:
+    stub_threaded_real_probes(monkeypatch)
+
+    async def unavailable(_: ObsWebSocketProbe) -> ObsObservation:
+        raise ObsAdapterError("sanitized")
+
+    monkeypatch.setattr(ObsWebSocketProbe, "inspect_obs", unavailable)
+    result = runner.invoke(app, ["validate", "--format", "json"])
+    assert result.exit_code == 1
+    statuses = {
+        x["status"]
+        for x in json.loads(result.stdout)["results"]
+        if x["subsystem"] == "obs"
+    }
+    assert statuses == {"FAIL"}
+
+
+def test_real_configured_mixer_timeout_exits_one(monkeypatch: Any, tmp_path: Path) -> None:
+    stub_threaded_real_probes(monkeypatch)
+
+    async def unavailable(_: XAirOscProbe) -> MixerObservation:
+        raise MixerUnavailable("sanitized")
+
+    monkeypatch.setattr(XAirOscProbe, "inspect_mixer", unavailable)
+    profile = tmp_path / "site.toml"
+    profile.write_text('[mixer]\nhost = "192.0.2.1"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["validate", "--profile", str(profile), "--format", "json"]
+    )
+    assert result.exit_code == 1
+    mixer = next(x for x in json.loads(result.stdout)["results"] if x["subsystem"] == "mixer")
+    assert mixer["status"] == "FAIL"
+
+
+def test_configuration_error_lists_field_without_secret_input(tmp_path: Path) -> None:
+    profile = tmp_path / "site.toml"
+    profile.write_text('[obs]\nport = "super-secret"\n', encoding="utf-8")
+    result = runner.invoke(app, ["config", "validate", "--profile", str(profile)])
+    assert result.exit_code == 2
+    assert "obs.port:" in result.stderr
+    assert "super-secret" not in result.stderr
 
 
 def test_json_output_file_keeps_stdout_empty(tmp_path: Path) -> None:

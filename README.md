@@ -47,9 +47,11 @@ returns `0`.
 
 ## Simulator scenarios
 
-`all-pass` demonstrates configured, observable equipment with all checks passing.
-`unknown-hardware` demonstrates missing or unsupported observations; it includes `UNKNOWN`
-results but still returns `0` because no check fails.
+Six bundled scenarios cover the result contract: `all-pass`, `definite-failure`,
+`warning-degraded`, `unknown-hardware`, `timeout`, and `malformed-response`. The timeout scenario
+models a configured mixer that does not respond and therefore exits `1`; a malformed response is
+`UNKNOWN` because reachability is known but its state cannot be interpreted. `WARN` demonstrates
+a missing optional process, while `UNKNOWN` demonstrates unconfigured hardware.
 
 <!-- smoke-test -->
 ```console
@@ -98,7 +100,7 @@ validation result, not a CLI crash.
 | --- | --- |
 | `PASS` | The observed state matches the configured expectation. |
 | `FAIL` | A configured, testable expectation was not met. |
-| `WARN` | A non-fatal concern was observed. Schema `1.0` reserves this status even when current checks do not emit it. |
+| `WARN` | A non-fatal degraded condition, such as a missing optional process, was observed. |
 | `UNKNOWN` | The state could not be determined or the relevant expectation/hardware support is absent. |
 
 | Exit | Meaning |
@@ -130,11 +132,20 @@ commands must remain deterministic, hardware-free, and successful.
 
 ## Windows build
 
-When the GitHub Actions `Windows package` job succeeds, it publishes the onedir artifact
-`wortava-windows-x64`. Open the repository's Actions page, select the commit's completed CI run,
-and download it from the Artifacts section. Extract the entire `wortava`
-directory, keep its files together, and run `wortava/wortava.exe`; the executable depends on the
-adjacent files in that directory. Verify it against the included `SHA256SUMS.txt` before use.
+When the GitHub Actions `Windows package` job succeeds, it publishes the artifact
+`wortava-windows-x64` containing `wortava-windows-x64.zip` and its checksum. Open the repository's
+Actions page, select the commit's completed CI run, and download it from the Artifacts section.
+In PowerShell, verify the downloaded archive before extracting it:
+
+```powershell
+$expected = (Get-Content .\wortava-windows-x64.zip.sha256).Split()[0]
+$actual = (Get-FileHash .\wortava-windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "Wortava archive checksum mismatch" }
+Expand-Archive .\wortava-windows-x64.zip -DestinationPath .\wortava-release
+```
+
+Keep the extracted `wortava` directory together and run
+`.\wortava-release\wortava\wortava.exe`; the executable depends on its adjacent files.
 
 To build the same layout on Windows from a checkout:
 
