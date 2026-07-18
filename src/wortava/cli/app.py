@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import tomllib
 import uuid
 from enum import StrEnum
@@ -24,6 +25,7 @@ from wortava.cli.reporters import render_terminal, report_to_dict
 from wortava.config.loader import load_settings
 from wortava.config.models import Settings
 from wortava.domain.models import ValidationReport
+from wortava.observability.logging import configure_logging, log_file_path
 from wortava.ports.probes import (
     AudioEndpoint,
     AudioProbe,
@@ -105,9 +107,31 @@ def _real_probes(settings: Settings) -> ProbeSuite:
     return RealProbeSuite(settings)
 
 
-def _run(settings: Settings, probes: ProbeSuite) -> ValidationReport:
-    checks = build_checks(settings, probes, probes, probes, probes)
-    return asyncio.run(run_validation(checks, str(uuid.uuid4())))
+def _close_logger(logger: logging.Logger) -> None:
+    for handler in tuple(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
+def _run(settings: Settings, probes: ProbeSuite) -> tuple[ValidationReport, Path]:
+    run_id = str(uuid.uuid4())
+    log_dir = Path("logs")
+    secrets = (
+        (settings.obs.password.get_secret_value(),)
+        if settings.obs.password is not None
+        else ()
+    )
+    logger = configure_logging(log_dir, run_id, secrets)
+    try:
+        checks = build_checks(settings, probes, probes, probes, probes)
+        report = asyncio.run(run_validation(checks, run_id, logger))
+    finally:
+        _close_logger(logger)
+    return report, log_file_path(log_dir, run_id)
+
+
+def _render_log_path(log_path: Path, output_format: OutputFormat) -> None:
+    typer.echo(f"Diagnostic log: {log_path}", err=output_format is OutputFormat.JSON)
 
 
 def _render(
@@ -142,8 +166,9 @@ def simulate(
     """Run a deterministic, fixture-backed validation scenario."""
     try:
         settings, probes = _load_scenario(scenario)
-        report = _run(settings, probes)
+        report, log_path = _run(settings, probes)
         _render(report, output_format, output, plain=plain)
+        _render_log_path(log_path, output_format)
     except (OSError, ValueError, json.JSONDecodeError, ValidationError) as error:
         _error("Simulation error", error, plain=plain)
     raise typer.Exit(report.exit_code)
@@ -160,8 +185,9 @@ def validate_system(
     try:
         settings = load_settings(_default_settings_path(), profile)
         probes = _real_probes(settings)
-        report = _run(settings, probes)
+        report, log_path = _run(settings, probes)
         _render(report, output_format, output, plain=plain)
+        _render_log_path(log_path, output_format)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
         _error("Configuration error", error, plain=plain)
     raise typer.Exit(report.exit_code)

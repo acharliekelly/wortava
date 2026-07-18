@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -70,9 +71,13 @@ class Check:
     operation: CheckOperation
 
 
-async def _run_one(check: Check, run: ValidationRun) -> CheckResult:
+async def _run_one(check: Check, run: ValidationRun, logger: logging.Logger) -> CheckResult:
     started = time.perf_counter()
     checked_at = datetime.now(UTC)
+    logger.info(
+        "Check started",
+        extra={"event": "check_started", "check_id": check.name},
+    )
     try:
         status, summary, evidence = await asyncio.wait_for(
             check.operation(run), check.timeout_seconds
@@ -85,12 +90,23 @@ async def _run_one(check: Check, run: ValidationRun) -> CheckResult:
         summary = "Check is unsupported on this platform"
         evidence = ()
         category = "unsupported_platform"
-    except Exception:
+    except Exception as error:
         status = Status.UNKNOWN
         summary = "Check could not determine state"
         evidence = ()
         category = "unexpected"
-    return CheckResult(
+        logger.exception(
+            "Unexpected %s: %s",
+            type(error).__name__,
+            str(error),
+            extra={
+                "event": "check_exception",
+                "check_id": check.name,
+                "exception_class": type(error).__name__,
+                "error_category": category,
+            },
+        )
+    result = CheckResult(
         check_id=check.name,
         subsystem=check.subsystem,
         status=status,
@@ -101,13 +117,26 @@ async def _run_one(check: Check, run: ValidationRun) -> CheckResult:
         checked_at=checked_at,
         error_category=category,
     )
+    logger.info(
+        "Check finished",
+        extra={
+            "event": "check_finished",
+            "check_id": check.name,
+            "duration_ms": result.duration_ms,
+            "error_category": result.error_category,
+        },
+    )
+    return result
 
 
-async def run_validation(checks: tuple[Check, ...], run_id: str) -> ValidationReport:
+async def run_validation(
+    checks: tuple[Check, ...], run_id: str, logger: logging.Logger | None = None
+) -> ValidationReport:
     started_at = datetime.now(UTC)
     run = ValidationRun()
+    run_logger = logger or logging.getLogger("wortava.null")
     try:
-        results = await asyncio.gather(*(_run_one(check, run) for check in checks))
+        results = await asyncio.gather(*(_run_one(check, run, run_logger) for check in checks))
     finally:
         await run.close()
     return ValidationReport("1.0", run_id, started_at, tuple(results))
