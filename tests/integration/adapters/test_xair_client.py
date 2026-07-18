@@ -62,7 +62,9 @@ async def test_probe_discovers_xr18_from_read_only_info_response() -> None:
 
         observation = await probe.inspect_mixer()
 
-    assert observation == MixerObservation(True, True, "XR18", "127.0.0.1")
+    assert observation == MixerObservation(
+        True, True, "XR18", f"127.0.0.1:{device.port}"
+    )
     assert device.requests == ["/info"]
 
 

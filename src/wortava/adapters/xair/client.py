@@ -97,4 +97,4 @@ class XAirOscProbe:
         if invalid_response or model is None:
             raise MixerProtocolError("Invalid mixer status response")
 
-        return MixerObservation(True, True, model, host)
+        return MixerObservation(True, True, model, f"{host}:{self._settings.port}")
