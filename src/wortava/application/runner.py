@@ -109,7 +109,7 @@ async def _run_one(check: Check, run: ValidationRun, logger: logging.Logger) -> 
         logger.exception(
             "Unexpected %s: %s",
             type(error).__name__,
-            str(error),
+            error,
             extra={
                 "event": "check_exception",
                 "check_id": check.name,
