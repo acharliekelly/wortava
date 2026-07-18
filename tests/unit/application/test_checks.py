@@ -57,8 +57,8 @@ def test_unobservable_installation_is_not_claimed_as_verified() -> None:
     status, summary, evidence = evaluate_process(
         (observation,), ProcessExpectation(name="obs64.exe")
     )
-    assert status is Status.PASS
-    assert "running" in summary
+    assert status is Status.UNKNOWN
+    assert "installation could not be verified" in summary
     assert next(item.value for item in evidence if item.key == "installed") is None
 
 

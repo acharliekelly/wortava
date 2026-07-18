@@ -43,6 +43,12 @@ def evaluate_process(
         return Status.FAIL, f"Expected process {expectation.name} was not found", evidence
     if matching.installed is False:
         return Status.FAIL, f"Expected process {expectation.name} is not installed", evidence
+    if expectation.required and matching.installed is None:
+        return (
+            Status.UNKNOWN,
+            f"Required process {expectation.name} installation could not be verified",
+            evidence,
+        )
     if not matching.running:
         return Status.FAIL, f"Expected process {expectation.name} is not running", evidence
     if expected_executable is not None and (
