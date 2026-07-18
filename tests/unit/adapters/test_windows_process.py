@@ -19,6 +19,10 @@ class FakeProcess:
         return self._info
 
 
+async def run_inline(operation: Any) -> Any:
+    return operation()
+
+
 @pytest.mark.asyncio
 async def test_process_discovery_is_case_insensitive_and_skips_inaccessible_processes(
     tmp_path: Path,
@@ -41,6 +45,7 @@ async def test_process_discovery_is_case_insensitive_and_skips_inaccessible_proc
             ProcessExpectation(name="Optional.exe"),
         ),
         process_iter=process_iter,
+        run_sync=run_inline,
     )
 
     observations = await probe.inspect_processes()
@@ -67,6 +72,7 @@ async def test_process_discovery_skips_expected_psutil_race_errors(
     probe = WindowsProcessProbe(
         (ProcessExpectation(name="Expected.exe"),),
         process_iter=lambda _attrs: [FakeProcess(vendor_error)],
+        run_sync=run_inline,
     )
 
     assert (await probe.inspect_processes())[0].running is False

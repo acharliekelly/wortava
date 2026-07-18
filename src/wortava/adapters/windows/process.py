@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -15,6 +15,12 @@ class VendorProcess(Protocol):
 
 
 type ProcessIterator = Callable[[list[str]], Iterable[VendorProcess]]
+type ProcessObservations = tuple[ProcessObservation, ...]
+type SyncRunner = Callable[[Callable[[], ProcessObservations]], Awaitable[ProcessObservations]]
+
+
+async def _run_in_thread(operation: Callable[[], ProcessObservations]) -> ProcessObservations:
+    return await asyncio.to_thread(operation)
 
 _PROCESS_ERRORS = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
 
@@ -24,12 +30,14 @@ class WindowsProcessProbe:
         self,
         expectations: tuple[ProcessExpectation, ...],
         process_iter: ProcessIterator = psutil.process_iter,
+        run_sync: SyncRunner = _run_in_thread,
     ) -> None:
         self._expectations = expectations
         self._process_iter = process_iter
+        self._run_sync = run_sync
 
     async def inspect_processes(self) -> tuple[ProcessObservation, ...]:
-        return await asyncio.to_thread(self._inspect_processes_sync)
+        return await self._run_sync(self._inspect_processes_sync)
 
     def _inspect_processes_sync(self) -> tuple[ProcessObservation, ...]:
         discovered: dict[str, dict[str, Any]] = {}

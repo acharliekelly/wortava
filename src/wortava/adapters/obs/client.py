@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import obsws_python  # type: ignore[import-untyped]
@@ -15,6 +15,11 @@ class ObsClient(Protocol):
 
 
 type ClientFactory = Callable[..., ObsClient]
+type SyncRunner = Callable[[Callable[[], ObsObservation]], Awaitable[ObsObservation]]
+
+
+async def _run_in_thread(operation: Callable[[], ObsObservation]) -> ObsObservation:
+    return await asyncio.to_thread(operation)
 
 
 class ObsAdapterError(RuntimeError):
@@ -26,12 +31,14 @@ class ObsWebSocketProbe:
         self,
         settings: ObsSettings,
         client_factory: ClientFactory = obsws_python.ReqClient,
+        run_sync: SyncRunner = _run_in_thread,
     ) -> None:
         self._settings = settings
         self._client_factory = client_factory
+        self._run_sync = run_sync
 
     async def inspect_obs(self) -> ObsObservation:
-        return await asyncio.to_thread(self._inspect_obs_sync)
+        return await self._run_sync(self._inspect_obs_sync)
 
     def _inspect_obs_sync(self) -> ObsObservation:
         password = (

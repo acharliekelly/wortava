@@ -25,6 +25,10 @@ class FakeObsClient:
         self.calls.append("disconnect")
 
 
+async def run_inline(operation: Any) -> Any:
+    return operation()
+
+
 @pytest.mark.asyncio
 async def test_obs_probe_queries_only_read_only_status_methods() -> None:
     client = FakeObsClient()
@@ -37,7 +41,9 @@ async def test_obs_probe_queries_only_read_only_status_methods() -> None:
     settings = ObsSettings(
         host="obs.local", port=4455, password=SecretStr("do-not-leak"), timeout_seconds=3
     )
-    probe = ObsWebSocketProbe(settings, client_factory=client_factory)
+    probe = ObsWebSocketProbe(
+        settings, client_factory=client_factory, run_sync=run_inline
+    )
 
     observation = await probe.inspect_obs()
 
@@ -60,7 +66,9 @@ async def test_obs_connection_error_is_typed_and_redacts_password() -> None:
         raise ConnectionError(f"could not authenticate with {password}")
 
     probe = ObsWebSocketProbe(
-        ObsSettings(password=SecretStr(password)), client_factory=client_factory
+        ObsSettings(password=SecretStr(password)),
+        client_factory=client_factory,
+        run_sync=run_inline,
     )
 
     with pytest.raises(ObsAdapterError) as caught:
