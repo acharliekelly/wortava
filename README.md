@@ -77,7 +77,7 @@ $ uv run wortava config validate --profile config/site.example.toml
 ## Commands
 
 - `uv run wortava validate [--profile PATH] [--format terminal|json] [--output PATH] [--plain]`
-  runs the real read-only adapters. Omit `--profile` to use `config/defaults.toml` alone.
+  runs the real read-only adapters. Omit `--profile` to use the package's safe defaults alone.
 - `uv run wortava simulate SCENARIO [...]` runs a bundled deterministic scenario.
 - `uv run wortava config validate --profile PATH` validates configuration only.
 - `uv run wortava list-checks` lists stable check IDs and subsystems.
@@ -120,9 +120,9 @@ before sending them outside the site.
 ## Development gates
 
 ```console
-$ uv run pytest
+$ uv run pytest --cov=wortava --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
 $ uv run ruff check .
-$ uv run mypy src/wortava
+$ uv run mypy src
 ```
 
 The documentation smoke test runs only commands explicitly marked `<!-- smoke-test -->`; those
@@ -130,9 +130,9 @@ commands must remain deterministic, hardware-free, and successful.
 
 ## Windows build
 
-Each successful GitHub Actions CI run publishes the onedir artifact `wortava-windows-x64` from
-the `Windows package` job. Open the repository's Actions page, select the commit's completed CI
-run, and download `wortava-windows-x64` from its Artifacts section. Extract the entire `wortava`
+When the GitHub Actions `Windows package` job succeeds, it publishes the onedir artifact
+`wortava-windows-x64`. Open the repository's Actions page, select the commit's completed CI run,
+and download it from the Artifacts section. Extract the entire `wortava`
 directory, keep its files together, and run `wortava/wortava.exe`; the executable depends on the
 adjacent files in that directory. Verify it against the included `SHA256SUMS.txt` before use.
 

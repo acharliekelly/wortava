@@ -30,6 +30,9 @@ wortava = "wortava.cli.app:main"
 requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/wortava"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
@@ -37,6 +40,9 @@ markers = [
   "asyncio: run a test in an asyncio event loop",
   "windows_package: requires an explicitly built Windows package",
 ]
+
+[tool.coverage.report]
+fail_under = 90
 
 [tool.ruff]
 target-version = "py312"

@@ -1,12 +1,13 @@
 import os
 import tomllib
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
 from wortava.config.models import Settings
 
 
-def _read(path: Path | None) -> dict[str, Any]:
+def _read(path: Traversable | None) -> dict[str, Any]:
     if path is None:
         return {}
     with path.open("rb") as stream:
@@ -23,7 +24,7 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def load_settings(defaults_path: Path, profile_path: Path | None) -> Settings:
+def load_settings(defaults_path: Traversable, profile_path: Path | None) -> Settings:
     values = _merge(_read(defaults_path), _read(profile_path))
     password = os.getenv("WORTAVA_OBS_PASSWORD")
     if password:

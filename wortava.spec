@@ -1,18 +1,26 @@
+from PyInstaller.compat import is_win
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 
 datas = [
-    ("config/defaults.toml", "config"),
+    ("src/wortava/config/defaults.toml", "wortava/config"),
     ("src/wortava/scenarios/*.json", "wortava/scenarios"),
 ]
 binaries = []
 hiddenimports = []
 
-for distribution in ("typer", "rich", "obsws_python", "pythonosc", "pycaw", "comtypes"):
+for distribution in ("typer", "rich", "obsws_python", "pythonosc"):
     collected_datas, collected_binaries, collected_imports = collect_all(distribution)
     datas += collected_datas
     binaries += collected_binaries
     hiddenimports += collected_imports
+
+if is_win:
+    for distribution in ("pycaw", "comtypes"):
+        collected_datas, collected_binaries, collected_imports = collect_all(distribution)
+        datas += collected_datas
+        binaries += collected_binaries
+        hiddenimports += collected_imports
 
 for distribution in ("typer", "rich"):
     datas += copy_metadata(distribution)

@@ -60,10 +60,10 @@ def _error(prefix: str, error: Exception, *, plain: bool = False) -> NoReturn:
     raise typer.Exit(2)
 
 
-def _default_settings_path() -> Path:
+def _default_settings_resource() -> Traversable:
     if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "config" / "defaults.toml"  # type: ignore[attr-defined]
-    return Path(__file__).resolve().parents[3] / "config" / "defaults.toml"
+        return Path(sys._MEIPASS) / "wortava" / "config" / "defaults.toml"  # type: ignore[attr-defined]
+    return files("wortava.config").joinpath("defaults.toml")
 
 
 def _scenario_resource(name: str) -> Traversable:
@@ -186,7 +186,7 @@ def validate_system(
 ) -> None:
     """Validate the configured system using real read-only adapters."""
     try:
-        settings = load_settings(_default_settings_path(), profile)
+        settings = load_settings(_default_settings_resource(), profile)
         probes = _real_probes(settings)
         report, log_path = _run(settings, probes)
         _render(report, output_format, output, plain=plain)
@@ -202,7 +202,7 @@ def validate_config(
 ) -> None:
     """Validate a site profile without contacting any equipment."""
     try:
-        load_settings(_default_settings_path(), profile)
+        load_settings(_default_settings_resource(), profile)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
         _error("Configuration error", error)
     typer.echo("Configuration is valid")
@@ -212,7 +212,7 @@ def validate_config(
 def list_checks() -> None:
     """List stable checks supplied by the default configuration."""
     try:
-        settings = load_settings(_default_settings_path(), None)
+        settings = load_settings(_default_settings_resource(), None)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
         _error("Configuration error", error)
     probes = SimulatedProbes({})

@@ -26,7 +26,7 @@ jobs:
         run: uv sync --extra dev --extra windows
       - run: uv run ruff check .
       - run: uv run mypy src
-      - run: uv run pytest --cov=wortava --cov-branch --cov-report=term-missing -q
+      - run: uv run pytest --cov=wortava --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
 
   windows-package:
     name: Windows package
