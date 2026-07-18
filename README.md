@@ -122,7 +122,7 @@ before sending them outside the site.
 ```console
 $ uv run pytest
 $ uv run ruff check .
-$ uv run mypy
+$ uv run mypy src/wortava
 ```
 
 The documentation smoke test runs only commands explicitly marked `<!-- smoke-test -->`; those
