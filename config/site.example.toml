@@ -1,0 +1,13 @@
+[obs]
+expected_scene = "Worship Wide"
+
+[mixer]
+host = "192.168.1.1"
+
+[audio]
+expected_render_endpoint = "X-AIR"
+expected_capture_endpoint = "X-AIR"
+expected_render_default_multimedia = true
+expected_render_default_communications = true
+expected_capture_default_multimedia = true
+expected_capture_default_communications = true

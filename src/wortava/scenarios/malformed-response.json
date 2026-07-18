@@ -1,0 +1,7 @@
+{
+  "settings": {"adapter_mode": "simulated", "mixer": {"host": "192.0.2.1"}},
+  "processes": {"items": []},
+  "obs": {"observation": {"connected": true, "current_scene": null, "virtual_camera_active": null}},
+  "mixer": {"error": "malformed"},
+  "audio": {"items": []}
+}

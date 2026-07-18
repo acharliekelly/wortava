@@ -1,0 +1,232 @@
+import asyncio
+import json
+import logging
+import sys
+import tomllib
+import uuid
+from enum import StrEnum
+from importlib.resources import files
+from importlib.resources.abc import Traversable
+from pathlib import Path
+from typing import Annotated, NoReturn, Protocol
+
+import typer
+from pydantic import ValidationError
+from rich.console import Console
+from rich.table import Table
+
+from wortava.adapters.obs.client import ObsWebSocketProbe
+from wortava.adapters.simulated import SimulatedProbes
+from wortava.adapters.windows.audio import WindowsAudioProbe
+from wortava.adapters.windows.process import WindowsProcessProbe
+from wortava.adapters.xair.client import XAirOscProbe
+from wortava.application.checks import build_checks
+from wortava.application.runner import run_validation
+from wortava.cli.reporters import render_terminal, report_to_dict
+from wortava.config.loader import load_settings
+from wortava.config.models import Settings
+from wortava.domain.models import ValidationReport
+from wortava.observability.logging import configure_logging, log_file_path
+from wortava.ports.probes import (
+    AudioEndpoint,
+    AudioProbe,
+    MixerObservation,
+    MixerProbe,
+    ObsObservation,
+    ObsProbe,
+    ProcessObservation,
+    ProcessProbe,
+)
+
+
+class OutputFormat(StrEnum):
+    TERMINAL = "terminal"
+    JSON = "json"
+
+
+class ProbeSuite(ProcessProbe, ObsProbe, MixerProbe, AudioProbe, Protocol):
+    """Probe bundle constructed by the CLI composition root."""
+
+
+app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+app.add_typer(config_app, name="config")
+
+
+def _error(prefix: str, error: Exception, *, plain: bool = False) -> NoReturn:
+    if isinstance(error, ValidationError):
+        detail = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors(include_url=False, include_context=False, include_input=False)
+        )
+    else:
+        detail = str(error).splitlines()[0]
+    console = Console(stderr=True, color_system=None) if plain else Console(stderr=True)
+    console.print(f"{prefix}: {detail}")
+    raise typer.Exit(2)
+
+
+def _default_settings_resource() -> Traversable:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "wortava" / "config" / "defaults.toml"  # type: ignore[attr-defined]
+    return files("wortava.config").joinpath("defaults.toml")
+
+
+def _scenario_resource(name: str) -> Traversable:
+    if not name or Path(name).name != name or name.endswith(".json"):
+        raise ValueError(f"unknown scenario {name!r}")
+    development_path = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "scenarios"
+    development_scenario = development_path / f"{name}.json"
+    if development_scenario.is_file():
+        return development_scenario
+    resource = files("wortava.scenarios").joinpath(f"{name}.json")
+    if not resource.is_file():
+        raise ValueError(f"unknown scenario {name!r}")
+    return resource
+
+
+def _load_scenario(name: str) -> tuple[Settings, SimulatedProbes]:
+    resource = _scenario_resource(name)
+    data = json.loads(resource.read_text(encoding="utf-8"))
+    settings = Settings.model_validate(data.get("settings", {"adapter_mode": "simulated"}))
+    return settings, SimulatedProbes(data)
+
+
+class RealProbeSuite:
+    def __init__(self, settings: Settings) -> None:
+        self._process = WindowsProcessProbe(settings.processes)
+        self._obs = ObsWebSocketProbe(settings.obs)
+        self._mixer = XAirOscProbe(settings.mixer)
+        self._audio = WindowsAudioProbe()
+
+    async def inspect_processes(self) -> tuple[ProcessObservation, ...]:
+        return await self._process.inspect_processes()
+
+    async def inspect_obs(self) -> ObsObservation:
+        return await self._obs.inspect_obs()
+
+    async def inspect_mixer(self) -> MixerObservation:
+        return await self._mixer.inspect_mixer()
+
+    async def inspect_audio(self) -> tuple[AudioEndpoint, ...]:
+        return await self._audio.inspect_audio()
+
+
+def _real_probes(settings: Settings) -> ProbeSuite:
+    return RealProbeSuite(settings)
+
+
+def _close_logger(logger: logging.Logger) -> None:
+    for handler in tuple(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
+def _run(settings: Settings, probes: ProbeSuite) -> tuple[ValidationReport, Path]:
+    run_id = str(uuid.uuid4())
+    log_dir = Path("logs")
+    secrets = (
+        (settings.obs.password.get_secret_value(),)
+        if settings.obs.password is not None
+        else ()
+    )
+    logger = configure_logging(log_dir, run_id, secrets)
+    try:
+        checks = build_checks(settings, probes, probes, probes, probes)
+        report = asyncio.run(run_validation(checks, run_id, logger))
+    finally:
+        _close_logger(logger)
+    return report, log_file_path(log_dir, run_id)
+
+
+def _render_log_path(log_path: Path, output_format: OutputFormat) -> None:
+    typer.echo(f"Diagnostic log: {log_path}", err=output_format is OutputFormat.JSON)
+
+
+def _render(
+    report: ValidationReport,
+    output_format: OutputFormat,
+    output: Path | None,
+    *,
+    plain: bool,
+) -> None:
+    if output_format is OutputFormat.JSON:
+        rendered = json.dumps(report_to_dict(report), indent=2) + "\n"
+        if output is not None:
+            output.write_text(rendered, encoding="utf-8")
+        else:
+            typer.echo(rendered, nl=False)
+        return
+    if output is not None:
+        with output.open("w", encoding="utf-8") as stream:
+            render_terminal(report, Console(file=stream, color_system=None))
+    else:
+        console = Console(color_system=None) if plain else Console()
+        render_terminal(report, console)
+
+
+@app.command()
+def simulate(
+    scenario: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TERMINAL,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    plain: Annotated[bool, typer.Option("--plain", help="Disable terminal colors.")] = False,
+) -> None:
+    """Run a deterministic, fixture-backed validation scenario."""
+    try:
+        settings, probes = _load_scenario(scenario)
+        report, log_path = _run(settings, probes)
+        _render(report, output_format, output, plain=plain)
+        _render_log_path(log_path, output_format)
+    except (OSError, ValueError, json.JSONDecodeError, ValidationError) as error:
+        _error("Simulation error", error, plain=plain)
+    raise typer.Exit(report.exit_code)
+
+
+@app.command("validate")
+def validate_system(
+    profile: Annotated[Path | None, typer.Option("--profile")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.TERMINAL,
+    output: Annotated[Path | None, typer.Option("--output")] = None,
+    plain: Annotated[bool, typer.Option("--plain", help="Disable terminal colors.")] = False,
+) -> None:
+    """Validate the configured system using real read-only adapters."""
+    try:
+        settings = load_settings(_default_settings_resource(), profile)
+        probes = _real_probes(settings)
+        report, log_path = _run(settings, probes)
+        _render(report, output_format, output, plain=plain)
+        _render_log_path(log_path, output_format)
+    except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
+        _error("Configuration error", error, plain=plain)
+    raise typer.Exit(report.exit_code)
+
+
+@config_app.command("validate")
+def validate_config(
+    profile: Annotated[Path, typer.Option("--profile")],
+) -> None:
+    """Validate a site profile without contacting any equipment."""
+    try:
+        load_settings(_default_settings_resource(), profile)
+    except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
+        _error("Configuration error", error)
+    typer.echo("Configuration is valid")
+
+
+@app.command("list-checks")
+def list_checks() -> None:
+    """List stable checks supplied by the default configuration."""
+    try:
+        settings = load_settings(_default_settings_resource(), None)
+    except (OSError, tomllib.TOMLDecodeError, ValidationError) as error:
+        _error("Configuration error", error)
+    probes = SimulatedProbes({})
+    table = Table("Check ID", "Subsystem")
+    for check in build_checks(settings, probes, probes, probes, probes):
+        table.add_row(check.name, check.subsystem.value)
+    Console().print(table)
+
+
+def main() -> None:
+    app()

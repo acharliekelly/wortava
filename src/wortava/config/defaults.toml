@@ -1,0 +1,24 @@
+adapter_mode = "real"
+
+[[processes]]
+name = "obs64.exe"
+required = true
+
+[[processes]]
+name = "Zoom.exe"
+required = true
+
+[[processes]]
+name = "X-AIR-Edit.exe"
+required = true
+
+[obs]
+host = "127.0.0.1"
+port = 4455
+timeout_seconds = 2.0
+
+[mixer]
+port = 10024
+timeout_seconds = 2.0
+
+[audio]

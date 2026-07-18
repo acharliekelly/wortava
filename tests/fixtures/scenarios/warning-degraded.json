@@ -1,0 +1,7 @@
+{
+  "settings": {"adapter_mode": "simulated", "processes": [{"name": "optional.exe", "required": false}]},
+  "processes": {"items": []},
+  "obs": {"observation": {"connected": true, "current_scene": null, "virtual_camera_active": null}},
+  "mixer": {"observation": {"configured": false, "reachable": null, "model": null, "address": null}},
+  "audio": {"items": []}
+}

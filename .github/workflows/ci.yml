@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        if: runner.os != 'Windows'
+        run: uv sync --extra dev
+      - name: Install dependencies with Windows adapters
+        if: runner.os == 'Windows'
+        run: uv sync --extra dev --extra windows
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest --cov=wortava --cov-branch --cov-report=term-missing --cov-fail-under=90 -q
+
+  windows-package:
+    name: Windows package
+    needs: tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --extra dev --extra windows
+      - name: Build onedir package
+        run: uv run pyinstaller wortava.spec --clean
+      - name: Smoke-test packaged executable
+        run: uv run pytest tests/acceptance/test_packaged_cli.py --run-windows-package -q
+      - name: Archive complete onedir and generate SHA-256 checksum
+        run: uv run python scripts/package_windows.py dist/wortava dist/wortava-windows-x64.zip
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: wortava-windows-x64
+          path: |
+            dist/wortava-windows-x64.zip
+            dist/wortava-windows-x64.zip.sha256
+          if-no-files-found: error

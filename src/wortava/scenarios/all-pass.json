@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "adapter_mode": "simulated",
+    "processes": [{"name": "obs64.exe", "required": true}],
+    "obs": {"expected_scene": "Worship Wide"},
+    "mixer": {"host": "192.168.1.1"},
+    "audio": {"expected_render_endpoint": "X-AIR", "expected_capture_endpoint": "X-AIR"}
+  },
+  "processes": {"items": [{"name": "obs64.exe", "installed": true, "running": true, "pid": 100, "executable": "C:/Program Files/obs-studio/bin/64bit/obs64.exe", "version": "31.1"}]},
+  "obs": {"observation": {"connected": true, "current_scene": "Worship Wide", "virtual_camera_active": true}},
+  "mixer": {"observation": {"configured": true, "reachable": true, "model": "XR18", "address": "192.168.1.1:10024"}},
+  "audio": {"items": [
+    {"endpoint_id": "render-1", "name": "X-AIR", "direction": "render", "active": true, "default_multimedia": true, "default_communications": true},
+    {"endpoint_id": "capture-1", "name": "X-AIR", "direction": "capture", "active": true, "default_multimedia": true, "default_communications": true}
+  ]}
+}

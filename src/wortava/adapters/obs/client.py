@@ -1,0 +1,99 @@
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol, cast
+
+import obsws_python  # type: ignore[import-untyped]
+
+from wortava.adapters.windows.worker import run_in_spawned_process
+from wortava.config.models import ObsSettings
+from wortava.ports.probes import ObsObservation
+
+
+class ObsClient(Protocol):
+    def get_current_program_scene(self) -> Any: ...
+
+    def get_virtual_cam_status(self) -> Any: ...
+
+
+type ClientFactory = Callable[..., ObsClient]
+type SyncRunner = Callable[[Callable[[], ObsObservation]], Awaitable[ObsObservation]]
+
+
+async def _run_in_thread(operation: Callable[[], ObsObservation]) -> ObsObservation:
+    return await asyncio.to_thread(operation)
+
+
+class ObsAdapterError(RuntimeError):
+    """A sanitized failure while reading OBS state."""
+
+
+class ObsWebSocketProbe:
+    def __init__(
+        self,
+        settings: ObsSettings,
+        client_factory: ClientFactory = obsws_python.ReqClient,
+        run_sync: SyncRunner = _run_in_thread,
+    ) -> None:
+        self._settings = settings
+        self._client_factory = client_factory
+        self._run_sync = run_sync
+        self._uses_default_worker = (
+            client_factory is obsws_python.ReqClient and run_sync is _run_in_thread
+        )
+
+    async def inspect_obs(self) -> ObsObservation:
+        if self._uses_default_worker:
+            try:
+                result = await run_in_spawned_process(
+                    _inspect_obs_worker,
+                    (self._settings,),
+                    timeout_seconds=max(0.01, self._settings.timeout_seconds * 0.9),
+                )
+                return cast(ObsObservation, result)
+            except (RuntimeError, TimeoutError) as error:
+                raise ObsAdapterError("Unable to read OBS status") from error
+        return await self._run_sync(self._inspect_obs_sync)
+
+    def _inspect_obs_sync(self) -> ObsObservation:
+        password = (
+            self._settings.password.get_secret_value()
+            if self._settings.password is not None
+            else ""
+        )
+        client: ObsClient | None = None
+        observation: ObsObservation | None = None
+        failed = False
+        try:
+            client = self._client_factory(
+                host=self._settings.host,
+                port=self._settings.port,
+                password=password,
+                timeout=self._settings.timeout_seconds,
+            )
+            scene = client.get_current_program_scene()
+            virtual_camera = client.get_virtual_cam_status()
+            observation = ObsObservation(
+                connected=True,
+                current_scene=scene.current_program_scene_name,
+                virtual_camera_active=virtual_camera.output_active,
+            )
+        except Exception:
+            failed = True
+        finally:
+            if client is not None:
+                disconnect = getattr(client, "disconnect", None)
+                close = getattr(client, "close", None)
+                try:
+                    if callable(disconnect):
+                        disconnect()
+                    elif callable(close):
+                        close()
+                except Exception:
+                    pass
+        if failed or observation is None:
+            raise ObsAdapterError("Unable to read OBS status")
+        return observation
+
+
+def _inspect_obs_worker(settings: ObsSettings) -> ObsObservation:
+    return ObsWebSocketProbe(settings, run_sync=_run_in_thread)._inspect_obs_sync()
