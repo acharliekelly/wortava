@@ -44,7 +44,8 @@ def test_simulate_all_pass_emits_json_and_zero_exit() -> None:
     document = json.loads(result.stdout)
     assert document["schema_version"] == "1.0"
     assert {item["status"] for item in document["results"]} == {"PASS"}
-    assert result.stderr == f"Diagnostic log: logs/wortava-{document['run_id']}.jsonl\n"
+    log_path = Path("logs") / f"wortava-{document['run_id']}.jsonl"
+    assert result.stderr == f"Diagnostic log: {log_path}\n"
     log_events = [
         json.loads(line)
         for line in Path(f"logs/wortava-{document['run_id']}.jsonl").read_text(
@@ -60,7 +61,8 @@ def test_simulate_unknown_hardware_emits_unknown_and_zero_exit() -> None:
     assert result.exit_code == 0
     document = json.loads(result.stdout)
     assert "UNKNOWN" in {item["status"] for item in document["results"]}
-    assert result.stderr == f"Diagnostic log: logs/wortava-{document['run_id']}.jsonl\n"
+    log_path = Path("logs") / f"wortava-{document['run_id']}.jsonl"
+    assert result.stderr == f"Diagnostic log: {log_path}\n"
 
 
 def test_all_six_packaged_scenarios_have_deterministic_status_and_exit() -> None:
@@ -134,7 +136,8 @@ def test_validate_composes_real_adapters_and_reports_unsupported_audio(
     audio = [item for item in document["results"] if item["subsystem"] == "audio"]
     assert {item["status"] for item in audio} == {"UNKNOWN"}
     assert {item["error_category"] for item in audio} == {"unsupported_platform"}
-    assert result.stderr == f"Diagnostic log: logs/wortava-{document['run_id']}.jsonl\n"
+    log_path = Path("logs") / f"wortava-{document['run_id']}.jsonl"
+    assert result.stderr == f"Diagnostic log: {log_path}\n"
 
 
 def test_real_obs_connection_failure_exits_one(monkeypatch: Any) -> None:
