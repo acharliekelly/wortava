@@ -162,13 +162,13 @@ class WindowsAudioProbe:
                 self._uninitialize_com or (lambda: None),
             )
 
-        from comtypes import CoInitialize, CoUninitialize  # type: ignore[import-not-found]
-        from pycaw.constants import (  # type: ignore[import-not-found]
+        from comtypes import CoInitialize, CoUninitialize
+        from pycaw.constants import (
             DEVICE_STATE,
             EDataFlow,
             ERole,
         )
-        from pycaw.pycaw import AudioUtilities  # type: ignore[import-not-found]
+        from pycaw.pycaw import AudioUtilities
 
         defaults = _CoreAudioDefaultRoles(
             AudioUtilities,
