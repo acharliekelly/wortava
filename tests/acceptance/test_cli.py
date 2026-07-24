@@ -5,6 +5,7 @@ from typing import Any
 from typer.testing import CliRunner
 
 from wortava.adapters.obs.client import ObsAdapterError, ObsWebSocketProbe
+from wortava.adapters.windows.audio import UnsupportedPlatform, WindowsAudioProbe
 from wortava.adapters.windows.process import WindowsProcessProbe
 from wortava.adapters.xair.client import MixerUnavailable, XAirOscProbe
 from wortava.cli import app as cli_app
@@ -27,9 +28,13 @@ def stub_threaded_real_probes(monkeypatch: Any) -> None:
     async def mixer(_: XAirOscProbe) -> MixerObservation:
         return MixerObservation(False, None, None, None)
 
+    async def audio(_: WindowsAudioProbe) -> tuple[()]:
+        raise UnsupportedPlatform("Windows audio inventory is unsupported on this platform")
+
     monkeypatch.setattr(WindowsProcessProbe, "inspect_processes", processes)
     monkeypatch.setattr(ObsWebSocketProbe, "inspect_obs", obs)
     monkeypatch.setattr(XAirOscProbe, "inspect_mixer", mixer)
+    monkeypatch.setattr(WindowsAudioProbe, "inspect_audio", audio)
 
 
 def test_simulate_all_pass_emits_json_and_zero_exit() -> None:
